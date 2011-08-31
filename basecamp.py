@@ -1,5 +1,10 @@
+from xml.etree import ElementTree as ET
+
 import urllib2
 import base64
+
+class BasecampError(Exception):
+    pass
 
 class Basecamp(object):
     """
@@ -18,17 +23,40 @@ class Basecamp(object):
             ('Authorization', 'Basic %s' % base64string)]
             
     def _request(self, path, data=None):
-        req = urllib2.Request('%s/%s' % (self.baseURL, path))
-        return self.opener.open(req).read()
+        if isinstance(data, ET._ElementInterface):
+            data = ET.tostring(data)
+        req = urllib2.Request('%s/%s' % (self.baseURL, path), data=data, \
+            # Set header again, because the request overwrites his content-type 
+            # header to 'application/x-www-form-urlencoded' if data is set.
+            headers={'Content-Type':'application/xml'})
+        try:
+            return self.opener.open(req)
+        except Exception, e:
+            raise BasecampError, '%s, %s' % (e.code, e.read())
         
     def project(self, project_id):
-        return self._request('projects/%u' % project_id)
-
-    def time_entries_report(self, company_id, date_from, date_to):
+        return self._request('projects/%u' % project_id).read()
+        
+    def time_entries(self, project_id, page=1):
+        return self._request('projects/%u/time_entries?page=%u' % (project_id, page)).read()
+        
+    def person(self, person_id):
+        return self._request('people/%u' % person_id).read()
+        
+    def people(self, company_id):
+        return self._request('companies/%u/people.xml' % company_id).read()
+        
+    def companies(self):
+        return self._request('companies.xml').read()
+        
+    def create_project(self, project_name):
         """
-        Returns a set of time entries of a company in a given time.
-        Dates should be in YYYYMMDD format.
+        Creates a project and returns the new project id from the given
+        location header.
         """
-        path = 'time_entries/report?from=%u&to=%u&filter_company_id=%u' \
-            % (date_from, date_to, company_id)
-        return self._request(path)
+        request = ET.Element('request')
+        project = ET.SubElement(request, 'project')
+        ET.SubElement(project, 'name').text = str(project_name)
+        result = self._request('projects.xml', request)
+        # location looks like /projects/7886826.xml
+        return int(result.headers.dict['location'].split('/')[-1].split('.')[0]) 
